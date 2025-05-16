@@ -1,0 +1,44 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - ../..:/workspaces:cached
+      # - /home/shared/lm_models:/opt/models # local llm models
+    command: ['sleep', 'infinity']
+#     network_mode: service:db
+#     # Use "forwardPorts" in **devcontainer.json** to forward an app port locally.
+#     # (Adding the "ports" property to this file will not forward from a Codespace.)
+#   rabbitmq:
+#     image: rabbitmq:3-management-alpine  # Includes management UI <button class="citation-flag" data-index="5"><button class="citation-flag" data-index="8">
+#     container_name: rabbitmq
+#     ports:
+#       - "6672:5672"    # AMQP protocol port
+#       - "21672:15672"  # Management UI <button class="citation-flag" data-index="1"><button class="citation-flag" data-index="5">
+#     environment:
+#       RABBITMQ_DEFAULT_USER: admin
+#       RABBITMQ_DEFAULT_PASS: admin123
+#       RABBITMQ_DEFAULT_VHOST: "/"  # Default virtual host <button class="citation-flag" data-index="5"><button class="citation-flag" data-index="8">
+#     volumes:
+#       - rabbitmq_data:/var/lib/rabbitmq  # Data persistence <button class="citation-flag" data-index="8"><button class="citation-flag" data-index="9">
+#     restart: always
+
+
+
+#   db:
+#     image: postgres:latest
+#     restart: unless-stopped
+#     volumes:
+#       - postgres-data:/var/lib/postgresql/data
+#     environment:
+#       POSTGRES_USER: postgres
+#       POSTGRES_DB: postgres
+#       POSTGRES_PASSWORD: postgres
+
+#     # Add "forwardPorts": ["5432"] to **devcontainer.json** to forward PostgreSQL locally.
+#     # (Adding the "ports" property to this file will not forward from a Codespace.)
+
+# volumes:
+#   postgres-data:
+#   rabbitmq_data:

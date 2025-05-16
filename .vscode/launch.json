@@ -1,0 +1,48 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Bot",
+      "type": "debugpy",
+      "consoleTitle":"bot",
+      "request": "launch",
+      "program": "${workspaceFolder}/app/bot/main.py",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/app",
+      }
+    },
+    {
+      "name": "SimpleBot",
+      "type": "debugpy",
+      "consoleTitle":"simple_bot",
+      "request": "launch",
+      "program": "${workspaceFolder}/simple_bot/main.py",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/simple_bot",
+      }
+    },
+    {
+      "name": "Python Debugger: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "GIGACHAT_API_KEY": "${env:GIGACHAT_API_KEY}",
+        "SALUTE_CREDENTIALS": "${env:SALUTE_CREDENTIALS}",
+        // "BOT_TOKEN":  "${env:BOT_TOKEN}",
+      }
+    }
+  ]
+}

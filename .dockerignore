@@ -1,0 +1,9 @@
+.devcontainer/
+.vscode/
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.lock
