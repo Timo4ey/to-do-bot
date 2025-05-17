@@ -1,7 +1,7 @@
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
-from aiogram.types import Message, ReplyParameters
+from aiogram.types import Message
 from aiogram import Bot, Dispatcher, F
 import asyncio
 import logging
@@ -64,8 +64,7 @@ async def handle_text(message: Message, state: FSMContext):
         audio = await create_audio_from_links(audio_list)
         logging.info(f"Created audio from links: {len(audio_list)} files")
         joined_audio = audio_handler.handle(audio)
-        logging.info(
-            f"Joined audio size: {len(joined_audio) if joined_audio else 0}")
+        logging.info(f"Joined audio size: {len(joined_audio) if joined_audio else 0}")
         sst_result: list[TranscriptionItem] | None = await stt_handler.handle(
             joined_audio
         )
@@ -88,21 +87,22 @@ async def handle_text(message: Message, state: FSMContext):
             await bot.send_message(
                 chat_id=message.chat.id,
                 text=(
-                    f'{llm_result.content}\n\n\n\n\n'
+                    f"{llm_result.content}\n\n\n\n\n"
                     "Транскрибация:\n"
-                    f'<blockquote>{combined_stt}</blockquote>'
+                    f"<blockquote>{combined_stt}</blockquote>"
                 ),
-                parse_mode='HTML'
+                parse_mode="HTML",
             )
         else:
             await bot.send_message(
                 # llm_result.content,
                 chat_id=message.chat.id,
                 text=(
-                    f'{llm_result.content}\n\n\n\n\n'
+                    f"{llm_result.content}\n\n\n\n\n"
                     "Транскрибация слишком большая для отправки. "
                     "Попробуйте отправить меньше аудиозаписей."
-                ))
+                ),
+            )
 
     else:
         if not is_valid_message(message.text):

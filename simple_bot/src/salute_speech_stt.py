@@ -103,7 +103,6 @@ class SaluteSpeechHandler(Handler):
             self.url_access_token,
             headers=headers,
             data={"scope": self.scope},
-            verify_ssl=False,
         ) as resp:
             resp.raise_for_status()
 
@@ -126,10 +125,8 @@ class SaluteSpeechHandler(Handler):
             url,
             headers={
                 "Authorization": self.access_token or "",
-                #   "Content-Length": str(len(file.file))
             },
             data={"file": file.file},
-            verify_ssl=False,  # type: ignore
         ) as resp:
             if resp.status > 299:
                 logger.error(f"{resp}", exc_info=True)
@@ -155,7 +152,6 @@ class SaluteSpeechHandler(Handler):
                 "Authorization": self.access_token or "",
             },
             json=payload,
-            verify_ssl=False,  # type: ignore
         ) as resp:
             data = await resp.json()
             return data["result"]["id"]
@@ -178,7 +174,6 @@ class SaluteSpeechHandler(Handler):
         async with self.session.get(
             url,
             headers={"Authorization": self.access_token or ""},
-            verify_ssl=False,  # type: ignore
         ) as resp:
             return await resp.read()
 
