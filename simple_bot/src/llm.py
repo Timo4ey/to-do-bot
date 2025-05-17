@@ -46,7 +46,6 @@ class GigaChatLLM(Handler):
     def start(self) -> None:
         self.llm = GigaChat(
             credentials=self.api_key,  # type: ignore
-            verify_ssl_certs=False,
             temperature=self.temperature,
         )
 

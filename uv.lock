@@ -154,6 +154,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "aiodns" },
     { name = "aiogram" },
+    { name = "certifi" },
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-gigachat" },
@@ -169,6 +170,7 @@ dev = [
 requires-dist = [
     { name = "aiodns", specifier = ">=3.4.0" },
     { name = "aiogram", specifier = ">=3.20.0.post0" },
+    { name = "certifi", specifier = ">=2025.4.26" },
     { name = "langchain", extras = ["cache"], specifier = ">=0.3.25" },
     { name = "langchain-community", specifier = ">=0.3.23" },
     { name = "langchain-gigachat", specifier = ">=0.3.10" },
