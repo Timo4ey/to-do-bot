@@ -1,3 +1,4 @@
+from enum import Enum
 import json
 from typing import Coroutine, Optional
 import aiohttp
@@ -24,6 +25,13 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+
+class HTTPMethods(str, Enum):
+    GET = "get"
+    POST = "post"
+    PUT = "put"
+    DELETE = "delete"
 
 
 class SaluteSpeechConfig(BaseSettings):
@@ -97,6 +105,25 @@ class SaluteSpeechHandler(Handler):
 
         return await handler(*args, **kwargs)
 
+    async def make_request(self, url: str,  method: HTTPMethods = HTTPMethods.GET, headers: dict = None, data: str | bytes | dict = None, json: dict = None):
+        output = None
+        if (method := getattr(self, session, method, None)):
+            kwargs = {}
+            if headers:
+                kwargs["headers"] = data
+            if data:
+                kwargs["data"] = data
+            if json:
+                kwargs["json"] = data
+
+            response: aiohttp.ClientResponse | None
+            async with method(url, **kwargs) as response:
+                match response.headers.get("Content-Type"):
+                    case "application/json":
+                        output = await response.json()
+                    case _:
+                        output = await response.read()
+            return output
     @property
     def session(self) -> aiohttp.ClientSession:
         if not self._session:
@@ -198,7 +225,8 @@ class SaluteSpeechHandler(Handler):
         ) as resp:
             if resp.status > 299:
                 logger.error(f"{resp}", exc_info=True)
-                raise aiohttp.ClientError(f"Error uploading file: {resp.status}")
+                raise aiohttp.ClientError(
+                    f"Error uploading file: {resp.status}")
             data = await resp.json()
             return data["result"]["request_file_id"]
 
@@ -298,7 +326,8 @@ class SaluteSpeechHandler(Handler):
                         break
                     case TaskStatus.ERROR:
                         error = (await self._handle("status", task_id))[1]
-                        logger.error(f"\nОшибка задачи: {error}", exc_info=True)
+                        logger.error(
+                            f"\nОшибка задачи: {error}", exc_info=True)
                         break
                     case TaskStatus.DONE:
                         logger.info(f"\nЗадача завершена: {response_id}")
