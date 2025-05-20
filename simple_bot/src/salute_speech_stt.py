@@ -1,6 +1,5 @@
-from enum import Enum
 import json
-from typing import Coroutine, Optional
+from typing import Coroutine
 import aiohttp
 import asyncio
 from typing import Any
@@ -16,6 +15,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+from src.client import BaseHTTPClient, HTTPMethods
 from src.enums import AudioFormat, TaskStatus
 from src.schemas import Audio, TranscriptionItem
 
@@ -25,13 +25,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-
-
-class HTTPMethods(str, Enum):
-    GET = "get"
-    POST = "post"
-    PUT = "put"
-    DELETE = "delete"
 
 
 class SaluteSpeechConfig(BaseSettings):
@@ -45,8 +38,6 @@ class SaluteSpeechConfig(BaseSettings):
         "https://smartspeech.sber.ru/rest/v1", alias="SALUTE_REST_URL"
     )
     check_interval: float = Field(2.0, alias="CHECK_INTERVAL")
-    # ssl_ru_path: str = Field(
-    #     "/usr/local/share/ca-certificates/russiantrustedca.crt ", alias="SSL_RU_CRT")
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -59,11 +50,19 @@ class SaluteSpeechHandler(Handler):
         self._access_token = None
         self._is_running = False
         self.config = self.Config(*args, **kwargs)
-        # print(certifi.contents())
         self.ssl_default_context = ssl.create_default_context(cadata=certifi.contents())
-        self._session: Optional[aiohttp.ClientSession] = None
         self._connector = None
         self.timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        resolver = aiohttp.AsyncResolver()
+        self._connector = aiohttp.TCPConnector(
+            resolver=resolver,
+            ssl_context=self.ssl_default_context,
+            keepalive_timeout=15,
+            limit=None,
+            limit_per_host=0,
+            enable_cleanup_closed=False,
+        )
+        self.http_client = BaseHTTPClient(self._connector)
 
     token_lock = asyncio.Lock()
 
@@ -105,48 +104,46 @@ class SaluteSpeechHandler(Handler):
 
         return await handler(*args, **kwargs)
 
-    async def make_request(self, url: str,  method: HTTPMethods = HTTPMethods.GET, headers: dict = None, data: str | bytes | dict = None, json: dict = None):
-        output = None
-        if (method := getattr(self, session, method, None)):
-            kwargs = {}
-            if headers:
-                kwargs["headers"] = data
-            if data:
-                kwargs["data"] = data
-            if json:
-                kwargs["json"] = data
-
-            response: aiohttp.ClientResponse | None
-            async with method(url, **kwargs) as response:
-                match response.headers.get("Content-Type"):
-                    case "application/json":
-                        output = await response.json()
-                    case _:
-                        output = await response.read()
-            return output
-    @property
-    def session(self) -> aiohttp.ClientSession:
-        if not self._session:
-            resolver = aiohttp.AsyncResolver()
-            self._connector = aiohttp.TCPConnector(
-                resolver=resolver,
-                ssl_context=self.ssl_default_context,
-                keepalive_timeout=15,
-                limit=None,
-                limit_per_host=0,
-                enable_cleanup_closed=False,
-            )
-            self._session = aiohttp.ClientSession(connector=self._connector)
-        return self._session
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            TimeoutError,
+            aiohttp_client_exp.ConnectionTimeoutError,
+            aiohttp.ClientResponseError,
+            aiohttp.ClientConnectorError,
+            aiohttp_client_exp.ClientConnectionError,
+            aiohttp.ClientResponseError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+        ),
+        max_tries=5,
+        max_time=30,
+        jitter=backoff.full_jitter,
+    )
+    async def make_request(
+        self,
+        method: str,
+        url: str,
+        data: dict = None,
+        headers: dict = None,
+        json: dict = None,
+    ) -> dict | bytes:
+        return await self.http_client.make_request(
+            url=url,
+            method=method,
+            headers=headers,
+            data=data,
+            json=json,
+        )
 
     async def start(self) -> None:
+        await self.http_client.start()
         await self._get_access_token()
         self._is_running = True
 
     async def stop(self) -> None:
         self._is_running = False
-        if self._session:
-            await self._session.close()
+
         if self._connector:
             await self._connector.close()
 
@@ -186,22 +183,18 @@ class SaluteSpeechHandler(Handler):
             "Content-Type": "application/x-www-form-urlencoded",
             "Authorization": f"Bearer {self.credentials}",
         }
-        resp: aiohttp.ClientResponse
-        async with self.session.post(
-            self.url_access_token,
-            headers=headers,
-            data={"scope": self.scope},
-        ) as resp:
-            resp.raise_for_status()
+        data = {"scope": self.config.scope}
+        data = await self.make_request(
+            HTTPMethods.POST, self.url_access_token, headers=headers, data=data
+        )
 
-            data = await resp.json()
-            access_token, exp = data["access_token"], data["expires_at"]
-            await self.set_access_token(f"Bearer {access_token}")
+        access_token, exp = data["access_token"], data["expires_at"]
+        await self.set_access_token(f"Bearer {access_token}")
 
-            asyncio.create_task(
-                self.callback_get_access_token(exp),
-                name=self.callback_get_access_token.__name__,
-            )
+        asyncio.create_task(
+            self.callback_get_access_token(exp),
+            name=self.callback_get_access_token.__name__,
+        )
 
     async def handle_upload(self, file: Audio) -> str:
         url = f"{self.url_rest}/data:upload"
@@ -209,26 +202,21 @@ class SaluteSpeechHandler(Handler):
         form.add_field(
             name="audio_file1",
             value=file.file,
-            filename=f"{file}",
+            filename=str(file),
             content_type="application/octet-stream",
         )
         logger.info(f"Request URL: {url}")
         logger.info(f"Payload size: {len(file.file)} bytes")
         logger.info(f"Payload: {form}")
-        async with self.session.post(
-            url,
-            headers={
-                "Authorization": await self.get_access_token() or "",
-            },
-            data=form,
-            timeout=self.timeout,
-        ) as resp:
-            if resp.status > 299:
-                logger.error(f"{resp}", exc_info=True)
-                raise aiohttp.ClientError(
-                    f"Error uploading file: {resp.status}")
-            data = await resp.json()
-            return data["result"]["request_file_id"]
+        headers = {
+            "Authorization": await self.get_access_token() or "",
+        }
+
+        data = await self.make_request(
+            method=HTTPMethods.POST, url=url, headers=headers, data=form
+        )
+
+        return data["result"]["request_file_id"]
 
     async def handle_recognize(self, file_id: str, codec: AudioFormat) -> str:
         url = f"{self.url_rest}/speech:async_recognize"
@@ -241,37 +229,33 @@ class SaluteSpeechHandler(Handler):
             },
             "request_file_id": file_id,
         }
-        async with self.session.post(
-            url,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": await self.get_access_token() or "",
-            },
-            json=payload,
-        ) as resp:
-            data = await resp.json()
-            return data["result"]["id"]
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": await self.get_access_token() or "",
+        }
+
+        data = await self.make_request(
+            method=HTTPMethods.POST, url=url, headers=headers, json=payload
+        )
+        return data["result"]["id"]
 
     async def handle_status(self, task_id: str) -> tuple[TaskStatus, str]:
         url = f"{self.url_rest}/task:get?id={task_id}"
 
         # type: ignore
-        async with self.session.get(
-            url, headers={"Authorization": await self.get_access_token()}
-        ) as resp:  # type: ignore
-            data = await resp.json()
-            status = TaskStatus(data["result"]["status"])
-            response_id = data["result"].get("response_file_id", "")
-            return status, response_id
+        headers = {"Authorization": await self.get_access_token()}
+
+        data = await self.make_request(HTTPMethods.GET, url, headers=headers)
+        status = TaskStatus(data["result"]["status"])
+        response_id = data["result"].get("response_file_id", "")
+        return status, response_id
 
     async def handle_download(self, file_id: str) -> bytes:
         url = f"{self.url_rest}/data:download?response_file_id={file_id}"
 
-        async with self.session.get(
-            url,
-            headers={"Authorization": await self.get_access_token() or ""},
-        ) as resp:
-            return await resp.read()
+        headers = {"Authorization": await self.get_access_token() or ""}
+
+        return await self.make_request(HTTPMethods.GET, url, headers=headers)
 
     async def handle_codec(self, file: Audio) -> str:
         """
@@ -282,21 +266,6 @@ class SaluteSpeechHandler(Handler):
             raise ValueError(f"Unsupported audio format: {file}")
         return codec
 
-    @backoff.on_exception(
-        backoff.expo,
-        (
-            TimeoutError,
-            aiohttp_client_exp.ConnectionTimeoutError,
-            aiohttp.ClientConnectorError,
-            aiohttp_client_exp.ClientConnectionError,
-            aiohttp.ClientResponseError,
-            aiohttp.ServerTimeoutError,
-            asyncio.TimeoutError,
-        ),
-        max_tries=5,
-        max_time=30,
-        jitter=backoff.full_jitter,
-    )
     async def handle(self, file: Audio) -> list[TranscriptionItem] | None:
         result = None
         try:
@@ -326,8 +295,7 @@ class SaluteSpeechHandler(Handler):
                         break
                     case TaskStatus.ERROR:
                         error = (await self._handle("status", task_id))[1]
-                        logger.error(
-                            f"\nОшибка задачи: {error}", exc_info=True)
+                        logger.error(f"\nОшибка задачи: {error}", exc_info=True)
                         break
                     case TaskStatus.DONE:
                         logger.info(f"\nЗадача завершена: {response_id}")

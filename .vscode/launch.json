@@ -26,6 +26,7 @@
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
       "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": true,
       "env": {
         "PYTHONPATH": "${workspaceFolder}/simple_bot",
       }
