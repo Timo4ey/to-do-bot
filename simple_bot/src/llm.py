@@ -53,7 +53,6 @@ class GigaChatLLM(Handler):
             credentials=self.api_key,  # type: ignore
             temperature=self.temperature,
             ssl_context=ssl.create_default_context(cadata=certifi.contents()),
-            # verify_ssl_certs=False,
         )
 
     @backoff.on_exception(
