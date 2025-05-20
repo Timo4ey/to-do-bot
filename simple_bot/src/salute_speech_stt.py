@@ -1,9 +1,15 @@
 import json
-from typing import Optional
+from typing import Coroutine, Optional
 import aiohttp
 import asyncio
 from typing import Any
 import logging
+import datetime
+import ssl
+import aiohttp.client_exceptions as aiohttp_client_exp
+import backoff
+import certifi
+import uuid
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,6 +37,8 @@ class SaluteSpeechConfig(BaseSettings):
         "https://smartspeech.sber.ru/rest/v1", alias="SALUTE_REST_URL"
     )
     check_interval: float = Field(2.0, alias="CHECK_INTERVAL")
+    # ssl_ru_path: str = Field(
+    #     "/usr/local/share/ca-certificates/russiantrustedca.crt ", alias="SSL_RU_CRT")
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -40,10 +48,24 @@ class SaluteSpeechHandler(Handler):
         name: str = Field(default="SaluteSpeechASR")
 
     def __init__(self, *args, **kwargs) -> None:
-        self.access_token = None
+        self._access_token = None
         self._is_running = False
         self.config = self.Config(*args, **kwargs)
+        # print(certifi.contents())
+        self.ssl_default_context = ssl.create_default_context(cadata=certifi.contents())
         self._session: Optional[aiohttp.ClientSession] = None
+        self._connector = None
+        self.timeout = aiohttp.ClientTimeout(total=30, connect=10)
+
+    token_lock = asyncio.Lock()
+
+    async def get_access_token(self):
+        async with self.token_lock:
+            return self.access_token
+
+    async def set_access_token(self, token: str):
+        async with self.token_lock:
+            self.access_token = token
 
     @property
     def credentials(self) -> str:
@@ -79,8 +101,15 @@ class SaluteSpeechHandler(Handler):
     def session(self) -> aiohttp.ClientSession:
         if not self._session:
             resolver = aiohttp.AsyncResolver()
-            connector = aiohttp.TCPConnector(resolver=resolver)
-            self._session = aiohttp.ClientSession(connector=connector)
+            self._connector = aiohttp.TCPConnector(
+                resolver=resolver,
+                ssl_context=self.ssl_default_context,
+                keepalive_timeout=15,
+                limit=None,
+                limit_per_host=0,
+                enable_cleanup_closed=False,
+            )
+            self._session = aiohttp.ClientSession(connector=self._connector)
         return self._session
 
     async def start(self) -> None:
@@ -88,13 +117,45 @@ class SaluteSpeechHandler(Handler):
         self._is_running = True
 
     async def stop(self) -> None:
-        if self.session is not None:
-            await self.session.close()
         self._is_running = False
+        if self._session:
+            await self._session.close()
+        if self._connector:
+            await self._connector.close()
+
+    async def suspended_task(task: Coroutine, timeout: int):
+        await asyncio.sleep(timeout)
+        task = asyncio.create_task(task, name=task.__name__)
+
+    async def callback_get_access_token(self, timestamp_ms):
+        dt = datetime.datetime.fromtimestamp(timestamp_ms / 1000)  # UTC время
+        logger.info(f"Token will be expired in {dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        now = datetime.datetime.now()
+        two_minutes = datetime.timedelta(minutes=2.0)
+        time_to_sleep = 0
+        if now < dt:
+            time_to_sleep = (dt - now - two_minutes).seconds
+
+        await asyncio.sleep(time_to_sleep)
+        logger.info("Token has been expired")
+        logger.info("Start updating token")
+        try:
+            await self._get_access_token()
+        except aiohttp.ClientConnectorError as _ex:
+            logger.error(f"Got client error {_ex}", exc_info=True)
+            asyncio.create_task(self.suspended_task(self._access_token(), 30))
+        except TimeoutError as _ex:
+            logger.error(f"Got {_ex}", exc_info=True)
+            asyncio.create_task(self.suspended_task(self._access_token(), 30))
+        except Exception as _ex:
+            logger.error(f"Got another error {_ex}", exc_info=True)
+            asyncio.create_task(self.suspended_task(self._access_token(), 30))
+
+        logger.info("Token has been updated")
 
     async def _get_access_token(self):
         headers = {
-            "RqUID": "6f0b1291-c7f3-43c6-bb2e-9f3efb2dc98e",
+            "RqUID": f"{uuid.uuid4()}",
             "Content-Type": "application/x-www-form-urlencoded",
             "Authorization": f"Bearer {self.credentials}",
         }
@@ -107,7 +168,13 @@ class SaluteSpeechHandler(Handler):
             resp.raise_for_status()
 
             data = await resp.json()
-            self.access_token = f"Bearer {data['access_token']}"
+            access_token, exp = data["access_token"], data["expires_at"]
+            await self.set_access_token(f"Bearer {access_token}")
+
+            asyncio.create_task(
+                self.callback_get_access_token(exp),
+                name=self.callback_get_access_token.__name__,
+            )
 
     async def handle_upload(self, file: Audio) -> str:
         url = f"{self.url_rest}/data:upload"
@@ -124,9 +191,10 @@ class SaluteSpeechHandler(Handler):
         async with self.session.post(
             url,
             headers={
-                "Authorization": self.access_token or "",
+                "Authorization": await self.get_access_token() or "",
             },
-            data={"file": file.file},
+            data=form,
+            timeout=self.timeout,
         ) as resp:
             if resp.status > 299:
                 logger.error(f"{resp}", exc_info=True)
@@ -149,7 +217,7 @@ class SaluteSpeechHandler(Handler):
             url,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": self.access_token or "",
+                "Authorization": await self.get_access_token() or "",
             },
             json=payload,
         ) as resp:
@@ -161,7 +229,7 @@ class SaluteSpeechHandler(Handler):
 
         # type: ignore
         async with self.session.get(
-            url, headers={"Authorization": self.access_token}, verify_ssl=False
+            url, headers={"Authorization": await self.get_access_token()}
         ) as resp:  # type: ignore
             data = await resp.json()
             status = TaskStatus(data["result"]["status"])
@@ -173,7 +241,7 @@ class SaluteSpeechHandler(Handler):
 
         async with self.session.get(
             url,
-            headers={"Authorization": self.access_token or ""},
+            headers={"Authorization": await self.get_access_token() or ""},
         ) as resp:
             return await resp.read()
 
@@ -186,6 +254,21 @@ class SaluteSpeechHandler(Handler):
             raise ValueError(f"Unsupported audio format: {file}")
         return codec
 
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            TimeoutError,
+            aiohttp_client_exp.ConnectionTimeoutError,
+            aiohttp.ClientConnectorError,
+            aiohttp_client_exp.ClientConnectionError,
+            aiohttp.ClientResponseError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+        ),
+        max_tries=5,
+        max_time=30,
+        jitter=backoff.full_jitter,
+    )
     async def handle(self, file: Audio) -> list[TranscriptionItem] | None:
         result = None
         try:

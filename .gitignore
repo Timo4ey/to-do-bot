@@ -15,3 +15,7 @@ wheels/
 
 _smart_version/*
 _extra_smart_version/*
+_save/*
+
+
+*.log

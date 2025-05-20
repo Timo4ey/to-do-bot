@@ -1,10 +1,15 @@
+import httpcore
 import yaml  # type: ignore
-from langchain_gigachat import GigaChat
 import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import certifi
+import ssl
 
 
+from langchain_gigachat import GigaChat
 from langchain_core.messages import BaseMessage
+import backoff
+import httpx
 
 from src.handler import Handler
 
@@ -47,8 +52,17 @@ class GigaChatLLM(Handler):
         self.llm = GigaChat(
             credentials=self.api_key,  # type: ignore
             temperature=self.temperature,
+            ssl_context=ssl.create_default_context(cadata=certifi.contents()),
+            # verify_ssl_certs=False,
         )
 
+    @backoff.on_exception(
+        backoff.expo,
+        (TimeoutError, httpcore.ConnectTimeout, httpx.ConnectTimeout),
+        max_tries=5,
+        max_time=30,
+        jitter=backoff.full_jitter,
+    )
     async def handle(self, topic: str, message: str) -> BaseMessage:
         if topic not in self.system_prompts:
             raise ValueError(
