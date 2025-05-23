@@ -18,17 +18,17 @@
       }
     },
     {
-      "name": "SimpleBot",
+      "name": "To do BOT",
       "type": "debugpy",
-      "consoleTitle":"simple_bot",
+      "consoleTitle":"to-do-bot",
       "request": "launch",
-      "program": "${workspaceFolder}/simple_bot/main.py",
+      "program": "${workspaceFolder}/app/to_do_bot/main.py",
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
       "python": "${workspaceFolder}/.venv/bin/python",
       "justMyCode": true,
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/simple_bot",
+        "PYTHONPATH": "${workspaceFolder}/app/to_do_bot",
       }
     },
     {

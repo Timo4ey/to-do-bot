@@ -24,7 +24,7 @@ RUN curl -k "https://gu-st.ru/content/Other/doc/russian_trusted_root_ca.cer" -w 
     && apt-get purge curl -y
 
 # Copy application code after installing dependencies
-COPY ./simple_bot . 
+COPY ./to_do_bot . 
 
 # Use a non-root user for better security
 RUN useradd -m appuser && \
