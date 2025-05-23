@@ -39,10 +39,7 @@
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}",
-        "GIGACHAT_API_KEY": "${env:GIGACHAT_API_KEY}",
-        "SALUTE_CREDENTIALS": "${env:SALUTE_CREDENTIALS}",
-        // "BOT_TOKEN":  "${env:BOT_TOKEN}",
+
       }
     }
   ]

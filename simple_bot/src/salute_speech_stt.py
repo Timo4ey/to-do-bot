@@ -40,6 +40,7 @@ class SaluteSpeechConfig(BaseSettings):
     check_interval: float = Field(2.0, alias="CHECK_INTERVAL")
 
     model_config = SettingsConfigDict(extra="ignore")
+    simultaneous_requests: int = Field(3, alias="SALUTE_SIMULTANEOUS_REQUESTS")
 
 
 class SaluteSpeechHandler(Handler):
@@ -60,9 +61,10 @@ class SaluteSpeechHandler(Handler):
             keepalive_timeout=15,
             limit=None,
             limit_per_host=0,
-            enable_cleanup_closed=False,
+            enable_cleanup_closed=True,
         )
         self.http_client = BaseHTTPClient(self._connector)
+        self.semaphore = asyncio.Semaphore(self.config.simultaneous_requests)
 
     token_lock = asyncio.Lock()
 
@@ -104,22 +106,6 @@ class SaluteSpeechHandler(Handler):
 
         return await handler(*args, **kwargs)
 
-    @backoff.on_exception(
-        backoff.expo,
-        (
-            TimeoutError,
-            aiohttp_client_exp.ConnectionTimeoutError,
-            aiohttp.ClientResponseError,
-            aiohttp.ClientConnectorError,
-            aiohttp_client_exp.ClientConnectionError,
-            aiohttp.ClientResponseError,
-            aiohttp.ServerTimeoutError,
-            asyncio.TimeoutError,
-        ),
-        max_tries=5,
-        max_time=30,
-        jitter=backoff.full_jitter,
-    )
     async def make_request(
         self,
         method: str,
@@ -128,13 +114,14 @@ class SaluteSpeechHandler(Handler):
         headers: dict = None,
         json: dict = None,
     ) -> dict | bytes:
-        return await self.http_client.make_request(
-            url=url,
-            method=method,
-            headers=headers,
-            data=data,
-            json=json,
-        )
+        async with self.semaphore:
+            return await self.http_client.make_request(
+                url=url,
+                method=method,
+                headers=headers,
+                data=data,
+                json=json,
+            )
 
     async def start(self) -> None:
         await self.http_client.start()
@@ -149,7 +136,7 @@ class SaluteSpeechHandler(Handler):
 
     async def suspended_task(task: Coroutine, timeout: int):
         await asyncio.sleep(timeout)
-        task = asyncio.create_task(task, name=task.__name__)
+        asyncio.create_task(task, name=task.__name__)
 
     async def callback_get_access_token(self, timestamp_ms):
         dt = datetime.datetime.fromtimestamp(timestamp_ms / 1000)  # UTC время
@@ -177,6 +164,22 @@ class SaluteSpeechHandler(Handler):
 
         logger.info("Token has been updated")
 
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            TimeoutError,
+            aiohttp_client_exp.ConnectionTimeoutError,
+            aiohttp.ClientConnectorError,
+            aiohttp_client_exp.ClientConnectionError,
+            aiohttp.ClientResponseError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+            RuntimeError,
+        ),
+        max_tries=5,
+        max_time=30,
+        jitter=backoff.full_jitter,
+    )
     async def _get_access_token(self):
         headers = {
             "RqUID": f"{uuid.uuid4()}",
@@ -196,6 +199,22 @@ class SaluteSpeechHandler(Handler):
             name=self.callback_get_access_token.__name__,
         )
 
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            TimeoutError,
+            aiohttp_client_exp.ConnectionTimeoutError,
+            aiohttp.ClientConnectorError,
+            aiohttp_client_exp.ClientConnectionError,
+            aiohttp.ClientResponseError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+            RuntimeError,
+        ),
+        max_tries=5,
+        max_time=30,
+        jitter=backoff.full_jitter,
+    )
     async def handle_upload(self, file: Audio) -> str:
         url = f"{self.url_rest}/data:upload"
         form = aiohttp.FormData()
@@ -218,6 +237,22 @@ class SaluteSpeechHandler(Handler):
 
         return data["result"]["request_file_id"]
 
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            TimeoutError,
+            aiohttp_client_exp.ConnectionTimeoutError,
+            aiohttp.ClientConnectorError,
+            aiohttp_client_exp.ClientConnectionError,
+            aiohttp.ClientResponseError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+            RuntimeError,
+        ),
+        max_tries=5,
+        max_time=30,
+        jitter=backoff.full_jitter,
+    )
     async def handle_recognize(self, file_id: str, codec: AudioFormat) -> str:
         url = f"{self.url_rest}/speech:async_recognize"
         payload = {
@@ -239,6 +274,22 @@ class SaluteSpeechHandler(Handler):
         )
         return data["result"]["id"]
 
+    @backoff.on_exception(
+        backoff.expo,
+        (
+            TimeoutError,
+            aiohttp_client_exp.ConnectionTimeoutError,
+            aiohttp.ClientConnectorError,
+            aiohttp_client_exp.ClientConnectionError,
+            aiohttp.ClientResponseError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+            RuntimeError,
+        ),
+        max_tries=5,
+        max_time=30,
+        jitter=backoff.full_jitter,
+    )
     async def handle_status(self, task_id: str) -> tuple[TaskStatus, str]:
         url = f"{self.url_rest}/task:get?id={task_id}"
 
@@ -291,14 +342,14 @@ class SaluteSpeechHandler(Handler):
                     case TaskStatus.RUNNING:
                         logger.info("Задача в обработке")
                     case TaskStatus.CANCELED:
-                        logger.info("\nЗадача отменена")
+                        logger.info("Задача отменена")
                         break
                     case TaskStatus.ERROR:
                         error = (await self._handle("status", task_id))[1]
-                        logger.error(f"\nОшибка задачи: {error}", exc_info=True)
+                        logger.error(f"Ошибка задачи: {error}", exc_info=True)
                         break
                     case TaskStatus.DONE:
-                        logger.info(f"\nЗадача завершена: {response_id}")
+                        logger.info(f"Задача завершена: {response_id}")
 
                         # 4. Загрузка результатов
                         output = await self._handle("download", response_id)

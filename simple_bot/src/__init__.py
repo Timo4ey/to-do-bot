@@ -4,6 +4,7 @@ from src.audio_handler import AudioHandler, create_audio_from_links
 from src.salute_speech_stt import SaluteSpeechHandler
 from src.llm import GigaChatLLM
 from src.static import welcome_text
+from src.store import AsyncInMemoryStore
 
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "TranscriptionItem",
     "Result",
     "welcome_text",
+    "AsyncInMemoryStore",
 ]

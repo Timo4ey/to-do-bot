@@ -1,12 +1,13 @@
+import asyncio
+import logging
+import sys
+from os import getenv
+
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 from aiogram import Bot, Dispatcher, F
-import asyncio
-import logging
-import sys
-from os import getenv
 from dotenv import load_dotenv
 
 from aiogram.types.file import File
@@ -14,7 +15,13 @@ from aiogram.types.file import File
 from helpers import adapter_salute_speech, get_url, is_valid_message
 from keyboards import KeyboardEnum, keyboard_with_extra
 from middleware import ErrorHandlerMiddleware
-from src import init_bootstrap, create_audio_from_links, welcome_text, TranscriptionItem
+from src import (
+    init_bootstrap,
+    create_audio_from_links,
+    welcome_text,
+    TranscriptionItem,
+    AsyncInMemoryStore,
+)
 
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -39,8 +46,10 @@ class UserState(StatesGroup):
 async def start(message: Message, state: FSMContext):
     """Handle /start command: reset state and show main keyboard"""
     await state.clear()
-    await message.answer(
-        f"Добро пожаловать {message.from_user.full_name}! \n {welcome_text}",
+    await bot.send_message(
+        chat_id=message.chat.id,
+        text=(f"Добро пожаловать {message.from_user.full_name}! \n {welcome_text}"),
+        parse_mode="Markdown",
     )
 
 
@@ -70,7 +79,7 @@ async def handle_text(message: Message, state: FSMContext):
 
 async def handle_cancel(message: Message, state: FSMContext):
     """Handle cancellation of audio processing"""
-    STORE.pop(message.chat.id, [])
+    await STORE.pop(message.chat.id)
     await state.clear()
     await message.answer("Аудиозаписи удалены из обработки")
 
@@ -80,7 +89,7 @@ async def process_audio_with_text(message: Message, state: FSMContext):
     await state.set_state(UserState.action_selected)
 
     # Get and check stored audio
-    audio_list = STORE.pop(message.chat.id, [])
+    audio_list = await STORE.pop(message.chat.id)
     if not audio_list:
         await message.answer("Нет сохраненных аудио для обработки")
         return
@@ -175,9 +184,8 @@ async def handle_audio(message: Message, state: FSMContext):
 
     # Store media URL for later processing
     chat_id = message.chat.id
-    if chat_id not in STORE:
-        STORE[chat_id] = []
-    STORE[chat_id].append(media_url)
+
+    await STORE.put(chat_id, media_url)
 
     await message.answer(
         "Аудио получено. Можете отправить еще или выбрать действие в клавиатуре.",
@@ -214,7 +222,7 @@ async def main():
     TOKEN = getenv("BOT_TOKEN")
 
     # In-memory storage for audio links
-    STORE = {}
+    STORE = AsyncInMemoryStore()
 
     # User states for FSM
 

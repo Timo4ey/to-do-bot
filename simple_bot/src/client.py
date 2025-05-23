@@ -104,3 +104,7 @@ class BaseHTTPClient(AbstractClient):
     async def stop(self):
         await self._session.close()
         self.logger.info("Stopped client")
+
+    async def restart(self):
+        await self.stop()
+        await self.start()
