@@ -256,11 +256,23 @@ class SaluteSpeechHandler(Handler):
     async def handle_recognize(self, file_id: str, codec: AudioFormat) -> str:
         url = f"{self.url_rest}/speech:async_recognize"
         payload = {
+            # TODO: parametrize in config
             "options": {
                 "model": "general",
                 "audio_encoding": codec,
                 "sample_rate": 16000,
                 "channels_count": 1,
+                "hints": {
+                    "words": [
+                        "пбр",
+                        "дейлик",
+                        "дейли",
+                        "мр",
+                        "STT",
+                        "LLM",
+                    ],
+                    "enable_letters": True,
+                },
             },
             "request_file_id": file_id,
         }

@@ -15,7 +15,7 @@ def adapter_salute_speech(data: list[TranscriptionItem]) -> str:
         return ""
     for item in results:
         [result] = item
-        res.append(f"{result.text}")
+        res.append(f"{result.normalized_text}")
     return " ".join(res)
 
 
