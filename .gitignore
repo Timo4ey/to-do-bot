@@ -19,3 +19,6 @@ _save/*
 
 
 *.log
+
+# In dev files
+llm_yandex.py

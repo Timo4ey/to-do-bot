@@ -63,7 +63,7 @@ class GigaChatLLM(Handler):
             credentials=self.api_key,  # type: ignore
             temperature=self.temperature,
             ssl_context=ssl.create_default_context(cadata=certifi.contents()),
-            model="GigaChat",
+            model="GigaChat-2",
         )
         self.logger.info(f"LLM initialized with model: {self.llm.model}")
         self.logger.info(f"Simultaneous requests: {self.config.simultaneous_requests}")

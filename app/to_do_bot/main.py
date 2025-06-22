@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 from os import getenv
 
@@ -227,6 +228,11 @@ async def main():
     # User states for FSM
 
     bot = Bot(token=TOKEN)
+    # using this bot for another task with webhook. 
+    # So job can be pending 
+    # The bot won't start if it has some jobs till webhook consumes it
+    if os.getenv("ENV", "") == "DEV":
+        bot.delete_webhook(drop_pending_updates=True)
     llm, audio_handler, stt_handler = init_bootstrap()
 
     await dp.start_polling(bot)
