@@ -1,14 +1,17 @@
 import asyncio
+import datetime
 import logging
 import os
 import sys
-from os import getenv
+import typing
+import io
 
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
 from aiogram import Bot, Dispatcher, F
+
 from dotenv import load_dotenv
 
 from aiogram.types.file import File
@@ -23,6 +26,10 @@ from src import (
     TranscriptionItem,
     AsyncInMemoryStore,
 )
+
+
+class LLMResult(typing.Protocol):
+    content: str
 
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -140,29 +147,47 @@ async def generate_llm_response(action_text, transcription):
     return result
 
 
-async def send_formatted_response(chat_id, llm_result, transcription):
+def create_transcribe(transcription: str) -> str:
+    return f"Транскрибация:\n<blockquote>{transcription}</blockquote>"
+
+
+async def send_formatted_response(
+    chat_id: int, llm_result: LLMResult, transcription: str
+):
     """Send the formatted response to the user"""
+    main_content: str = f"{llm_result.content}\n\n\n\n\n"
+
     try:
-        if len(llm_result.content) + len(transcription) <= MAX_TEXT_LENGTH - 1:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    f"{llm_result.content}\n\n\n\n\n"
-                    "Транскрибация:\n"
-                    f"<blockquote>{transcription}</blockquote>"
-                ),
-                parse_mode="HTML",
+        is_proper_size = (
+            len(llm_result.content) + len(transcription) <= MAX_TEXT_LENGTH - 1
+        )
+        res = (
+            (f"{main_content}{create_transcribe(transcription)}")
+            if is_proper_size
+            else main_content
+        )
+
+        await bot.send_message(
+            chat_id=chat_id,
+            text=res,
+            parse_mode="HTML",
+        )
+
+        if is_proper_size is False:
+            text_file = io.BytesIO(transcription.encode("utf-8"))
+            text_file.name = (
+                f"Transcribe: {datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
             )
-        else:
-            await bot.send_message(
+            await bot.send_document(
                 chat_id=chat_id,
-                text=(
-                    f"{llm_result.content}\n\n\n\n\n"
-                    "Транскрибация слишком большая для отправки. "
-                    "Попробуйте отправить меньше аудиозаписей."
+                # TODO: need to cached this `caption` in memory
+                caption="Ваша транскрибация не влезла в сообщение.\nОтправляем отдельным файлом: ",
+                document=BufferedInputFile(
+                    text_file.getvalue(), filename=text_file.name
                 ),
             )
     except Exception as _ex:
+        # TODO: check what's happening here
         logger.error("Bad format from llm", exc_info=True)
         await bot.send_message(
             chat_id=chat_id,
@@ -189,7 +214,7 @@ async def handle_audio(message: Message, state: FSMContext):
     await STORE.put(chat_id, media_url)
 
     await message.answer(
-        "Аудио получено. Можете отправить еще или выбрать действие в клавиатуре.",
+        "Аудио получено. Можете отправить еще или выбрать действие на клавиатуре.",
         reply_markup=keyboard_with_extra,
     )
 
@@ -220,7 +245,7 @@ async def main():
     global llm, audio_handler, stt_handler, STORE, bot, MAX_TEXT_LENGTH
     MAX_TEXT_LENGTH = 4096
     # Bot token from environment variable
-    TOKEN = getenv("BOT_TOKEN")
+    TOKEN = os.getenv("BOT_TOKEN")
 
     # In-memory storage for audio links
     STORE = AsyncInMemoryStore()
@@ -228,8 +253,8 @@ async def main():
     # User states for FSM
 
     bot = Bot(token=TOKEN)
-    # using this bot for another task with webhook. 
-    # So job can be pending 
+    # using this bot for another task with webhook.
+    # So job can be pending
     # The bot won't start if it has some jobs till webhook consumes it
     if os.getenv("ENV", "") == "DEV":
         bot.delete_webhook(drop_pending_updates=True)
